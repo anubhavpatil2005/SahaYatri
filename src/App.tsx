@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { demoMatches, zones } from './data'
+import brandLogo from '../gemini-svg.svg'
 
 type Step = 'details' | 'queue' | 'matched'
 
@@ -22,8 +23,7 @@ export default function App() {
     <main className="app-shell">
       <header className="site-header">
         <a className="brand" href="#top" aria-label="SahaYatri home">
-          <span className="brand-mark" aria-hidden="true">S</span>
-          <span>SahaYatri</span>
+          <img src={brandLogo} alt="SahaYatri — smart airport pooling" />
         </a>
         <span className="pilot-badge">Mumbai pilot</span>
       </header>
