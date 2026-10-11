@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import { demoMatches, zones } from './data'
 import brandLogo from '../gemini-svg.svg'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
+import { createRideRequest } from './services/rideRequests'
 
 type Step = 'details' | 'queue' | 'matched'
 
@@ -10,12 +13,59 @@ export default function App() {
   const [step, setStep] = useState<Step>('details')
   const [flightNumber, setFlightNumber] = useState('AI 681')
   const [arrivalTime, setArrivalTime] = useState('20:15')
+  const [terminal, setTerminal] = useState('T2')
   const [zoneId, setZoneId] = useState('powai')
   const [luggage, setLuggage] = useState<'light' | 'standard'>('standard')
+  const [email, setEmail] = useState('')
+  const [session, setSession] = useState<Session | null>(null)
+  const [authMessage, setAuthMessage] = useState('')
+  const [formError, setFormError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [queueMode, setQueueMode] = useState<'demo' | 'live'>('demo')
   const selectedZone = useMemo(() => zones.find((zone) => zone.id === zoneId)!, [zoneId])
   const estimatedSplit = Math.ceil(selectedZone.typicalFare / 3)
 
-  const joinQueue = () => setStep('queue')
+  useEffect(() => {
+    if (!supabase) return
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => authListener.subscription.unsubscribe()
+  }, [])
+
+  const sendMagicLink = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase || !email) return
+    setAuthMessage('')
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin },
+    })
+    setAuthMessage(error ? error.message : 'Check your inbox for a secure sign-in link.')
+  }
+
+  const joinQueue = async () => {
+    if (isSupabaseConfigured && !session) {
+      setFormError('Sign in with your email first to join the live queue.')
+      return
+    }
+    setFormError('')
+    setIsSubmitting(true)
+    try {
+      const result = await createRideRequest({
+        flightNumber,
+        expectedArrival: arrivalTime,
+        terminal,
+        dropoffZoneId: zoneId,
+        luggageSize: luggage,
+      })
+      setQueueMode(result.mode)
+      setStep('queue')
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'We could not join the queue. Please try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
   const showDemoMatch = () => setStep('matched')
   const resetTrip = () => setStep('details')
 
@@ -33,6 +83,26 @@ export default function App() {
         <h1>Land together.<br /><em>Ride smarter.</em></h1>
         <p className="hero-copy">Find people arriving when you do and travelling toward the same part of Mumbai.</p>
       </section>
+
+      {isSupabaseConfigured && !session ? (
+        <section className="auth-card" aria-labelledby="sign-in-title">
+          <div>
+            <p className="eyebrow">Live queue access</p>
+            <h2 id="sign-in-title">Sign in before matching</h2>
+            <p>We use a secure email link instead of passwords or paid SMS OTPs.</p>
+          </div>
+          <form onSubmit={sendMagicLink}>
+            <label htmlFor="email">Email address</label>
+            <div className="email-row">
+              <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
+              <button className="secondary-button" type="submit">Send link</button>
+            </div>
+          </form>
+          {authMessage ? <p className="auth-message" role="status">{authMessage}</p> : null}
+        </section>
+      ) : null}
+
+      {isSupabaseConfigured && session ? <p className="signed-in">Signed in as {session.user.email}</p> : null}
 
       <section className="progress" aria-label="Ride request progress">
         {['Trip details', 'Find co-riders', 'Your group'].map((label, index) => {
@@ -62,7 +132,7 @@ export default function App() {
               <input type="time" value={arrivalTime} onChange={(event) => setArrivalTime(event.target.value)} />
             </label>
             <label>Terminal
-              <select defaultValue="T2"><option>T2</option><option>T1</option></select>
+              <select value={terminal} onChange={(event) => setTerminal(event.target.value)}><option>T2</option><option>T1</option></select>
             </label>
           </div>
           <fieldset>
@@ -81,7 +151,8 @@ export default function App() {
             </div>
           </fieldset>
           <aside className="estimate"><span>Estimated shared fare</span><strong>{formatRupees(estimatedSplit)}–{formatRupees(estimatedSplit + 80)}</strong><small>Based on a 3-person ride to {selectedZone.name}</small></aside>
-          <button className="primary-button" type="button" onClick={joinQueue} disabled={!flightNumber || !arrivalTime}>Find my co-riders <span aria-hidden="true">→</span></button>
+          {formError ? <p className="form-error" role="alert">{formError}</p> : null}
+          <button className="primary-button" type="button" onClick={joinQueue} disabled={!flightNumber || !arrivalTime || isSubmitting}>{isSubmitting ? 'Joining the queue…' : 'Find my co-riders'} <span aria-hidden="true">→</span></button>
           <p className="fine-print">No payment or contact sharing happens until you approve a group.</p>
         </section>
       ) : null}
@@ -91,9 +162,9 @@ export default function App() {
           <div className="radar" aria-hidden="true"><span /><span /><i /></div>
           <p className="eyebrow">Looking around Terminal 2</p>
           <h2>We’re finding your people</h2>
-          <p>We’re checking arrivals near <strong>{arrivalTime}</strong> travelling towards <strong>{selectedZone.name}</strong>.</p>
-          <div className="queue-stat"><strong>2</strong><span>potential co-riders found</span></div>
-          <button className="primary-button" type="button" onClick={showDemoMatch}>View demo match <span aria-hidden="true">→</span></button>
+          <p>{queueMode === 'live' ? <>Your protected ride request is live for <strong>{selectedZone.name}</strong>. We’ll only reveal a group after a safe match is found.</> : <>We’re checking arrivals near <strong>{arrivalTime}</strong> travelling towards <strong>{selectedZone.name}</strong>.</>}</p>
+          <div className="queue-stat"><strong>{queueMode === 'live' ? 'Live' : '2'}</strong><span>{queueMode === 'live' ? 'request safely added to the queue' : 'potential co-riders found'}</span></div>
+          {queueMode === 'demo' ? <button className="primary-button" type="button" onClick={showDemoMatch}>View demo match <span aria-hidden="true">→</span></button> : null}
           <button className="text-button" type="button" onClick={resetTrip}>Edit trip details</button>
         </section>
       ) : null}
