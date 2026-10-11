@@ -47,4 +47,16 @@ environment variables. The planned integration will use Supabase PostgreSQL
 for ride requests and Supabase Realtime for live queue updates, avoiding a
 separate Redis server for the pilot.
 
+### Connect Supabase
+
+1. Create a project at [Supabase](https://supabase.com/).
+2. In the SQL Editor, run `supabase/migrations/0001_ride_requests.sql`.
+3. Copy `.env.example` to `.env` and fill in the **Project URL** and
+   **anon/publishable key** from Project Settings → API.
+4. Enable Email authentication in Supabase before connecting the live queue.
+
+The migration enables Row Level Security. A passenger can only create, read,
+or update their own ride request; the matching service will be added later as
+a trusted server-side function.
+
 Never commit provider keys, database passwords or payment secrets to Git.
