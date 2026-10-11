@@ -1,0 +1,9 @@
+{
+  "name": "SahaYatri",
+  "short_name": "SahaYatri",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7fbf8",
+  "theme_color": "#0f6b5d",
+  "description": "Airport rides, shared better."
+}
